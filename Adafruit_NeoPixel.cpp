@@ -1520,7 +1520,7 @@ void Adafruit_NeoPixel::show(void) {
     // similar but NOT an exact copy of the prior 400-on-8 code.
 
     // 20 inst. clocks per bit: HHHHHxxxxxxxxLLLLLLL
-    // ST instructions:         ^   ^        ^       (T=0,5,13)
+    // ST instructions:         ^    ^       ^       (T=0,5,13)
 
     volatile uint8_t next, bit;
 
@@ -1656,6 +1656,187 @@ void Adafruit_NeoPixel::show(void) {
                  "\n\t" // 2    nop nop       (T = 36)
                  "sbiw %[count], 1"
                  "\n\t" // 2    i--           (T = 38)
+                 "brne head40"
+                 "\n" // 1-2  if(i != 0) -> (next byte)
+                 : [port] "+e"(port), [byte] "+r"(b), [bit] "+r"(bit),
+                   [next] "+r"(next), [count] "+w"(i)
+                 : [ptr] "e"(ptr), [hi] "r"(hi), [lo] "r"(lo));
+  }
+#endif // NEO_KHZ400
+
+// 20 MHz(ish) AVR --------------------------------------------------------
+#elif (F_CPU > 19000000UL) && (F_CPU <= 30000000L)
+
+#if defined(NEO_KHZ400) // 800 KHz check needed only if 400 KHz support enabled
+  if (is800KHz) {
+#endif
+
+    // WS2811 and WS2812 have different hi/lo duty cycles; this is
+    // similar but NOT an exact copy of the prior 400-on-8 code.
+
+    // 25 inst. clocks per bit: HHHHHHHxxxxxxxxxLLLLLLLLL
+    // ST instructions:         ^      ^        ^         (T=0,7,16)
+
+    volatile uint8_t next, bit;
+
+    hi = *port | pinMask;
+    lo = *port & ~pinMask;
+    next = lo;
+    bit = 8;
+
+    asm volatile("head20:"
+                 "\n\t" // Clk  Pseudocode    (T =  0)
+                 "st   %a[port],  %[hi]"
+                 "\n\t" // 2    PORT = hi     (T =  2)
+                 "sbrc %[byte],  7"
+                 "\n\t" // 1-2  if(b & 128)
+                 "mov  %[next], %[hi]"
+                 "\n\t" // 0-1   next = hi    (T =  4)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T =  6)
+                 "dec  %[bit]"
+                 "\n\t" // 1    bit--         (T =  7)
+                 "st   %a[port],  %[next]"
+                 "\n\t" // 2    PORT = next   (T =  9)
+                 "mov  %[next] ,  %[lo]"
+                 "\n\t" // 1    next = lo     (T = 10)
+                 "breq nextbyte20"
+                 "\n\t" // 1-2  if(bit == 0) (from dec above)
+                 "rol  %[byte]"
+                 "\n\t" // 1    b <<= 1       (T = 12)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 14)
+                 "rjmp .+0"
+                 "\n\t" // 1    nop nop       (T = 16)
+                 "st   %a[port],  %[lo]"
+                 "\n\t" // 2    PORT = lo     (T = 18)
+                 "nop"
+                 "\n\t" // 1    nop           (T = 19)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 21)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 23)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 25)
+                 "rjmp head20"
+                 "\n\t" // 2    -> head20 (next bit out)
+                 "nextbyte20:"
+                 "\n\t" //                    (T = 12)
+                 "ldi  %[bit]  ,  8"
+                 "\n\t" // 1    bit = 8       (T = 13)
+                 "ld   %[byte] ,  %a[ptr]+"
+                 "\n\t" // 2    b = *ptr++    (T = 15)
+                 "nop"
+                 "\n\t" // 1    nop           (T = 16)
+                 "st   %a[port], %[lo]"
+                 "\n\t" // 2    PORT = lo     (T = 18)
+                 "nop"
+                 "\n\t" // 1    nop           (T = 19)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 21)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 23)
+                 "sbiw %[count], 1"
+                 "\n\t" // 2    i--           (T = 25)
+                 "brne head20"
+                 "\n" // 2    if(i != 0) -> (next byte)
+                 : [port] "+e"(port), [byte] "+r"(b), [bit] "+r"(bit),
+                   [next] "+r"(next), [count] "+w"(i)
+                 : [ptr] "e"(ptr), [hi] "r"(hi), [lo] "r"(lo));
+
+#if defined(NEO_KHZ400)
+  } else { // 400 KHz
+
+    // The 400 KHz clock on 20 MHz MCU is the most 'relaxed' version.
+
+    // 50 inst. clocks per bit: HHHHHHHHHHHHHHxxxxxxxxxxxxLLLLLLLLLLLLLLLLLLL
+    // ST instructions:         ^             ^           ^         (T=0,14,26)
+
+    volatile uint8_t next, bit;
+
+    hi = *port | pinMask;
+    lo = *port & ~pinMask;
+    next = lo;
+    bit = 8;
+
+    asm volatile("head40:"
+                 "\n\t" // Clk  Pseudocode    (T =  0)
+                 "st   %a[port], %[hi]"
+                 "\n\t" // 2    PORT = hi     (T =  2)
+                 "sbrc %[byte] , 7"
+                 "\n\t" // 1-2  if(b & 128)
+                 "mov  %[next] , %[hi]"
+                 "\n\t" // 0-1   next = hi    (T =  4)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T =  6)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T =  8)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 10)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 12)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 14)
+                 "st   %a[port], %[next]"
+                 "\n\t" // 2    PORT = next   (T = 16)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 18)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 20)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 22)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 24)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 26)
+                 "st   %a[port], %[lo]"
+                 "\n\t" // 2    PORT = lo     (T = 28)
+                 "nop"
+                 "\n\t" // 1    nop           (T = 29)
+                 "mov  %[next] , %[lo]"
+                 "\n\t" // 1    next = lo     (T = 30)
+                 "dec  %[bit]"
+                 "\n\t" // 1    bit--         (T = 31)
+                 "breq nextbyte40"
+                 "\n\t" // 1-2  if(bit == 0)
+                 "rol  %[byte]"
+                 "\n\t" // 1    b <<= 1       (T = 33)
+                 "nop"
+                 "\n\t" // 1    nop           (T = 34)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 36)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 38)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 40)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 42)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 44)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 46)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 48)
+                 "rjmp head40"
+                 "\n\t" // 2    -> head40 (next bit out)
+                 "nextbyte40:"
+                 "\n\t" //                    (T = 33)
+                 "ldi  %[bit]  , 8"
+                 "\n\t" // 1    bit = 8       (T = 34)
+                 "ld   %[byte] , %a[ptr]+"
+                 "\n\t" // 2    b = *ptr++    (T = 36)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 38)
+                 "st   %a[port], %[lo]"
+                 "\n\t" // 2    PORT = lo     (T = 40)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 42)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 44)
+                 "rjmp .+0"
+                 "\n\t" // 2    nop nop       (T = 46)
+                 "sbiw %[count], 1"
+                 "\n\t" // 2    i--           (T = 48)
                  "brne head40"
                  "\n" // 1-2  if(i != 0) -> (next byte)
                  : [port] "+e"(port), [byte] "+r"(b), [bit] "+r"(bit),
@@ -3471,4 +3652,4 @@ neoPixelType Adafruit_NeoPixel::str2order(const char *v) {
   }
   if (w < 0) w = r; // If 'w' not specified, duplicate r bits
   return (w << 6) | (r << 4) | ((g & 3) << 2) | (b & 3);
-} 
+}
